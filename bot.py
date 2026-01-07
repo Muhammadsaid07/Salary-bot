@@ -18,6 +18,23 @@ from telegram.ext import (
 from database import Database
 from sheets_handler import SheetsHandler
 import config
+from flask import Flask
+import threading
+from telegram.request import HTTPXRequest
+# -------------------- FLASK KEEP-ALIVE (RENDER FIX) --------------------
+
+app = Flask(__name__)
+
+@app.route("/")
+def health():
+    return "OK", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_flask, daemon=True).start()
+
 
 load_dotenv()
 
@@ -313,7 +330,20 @@ async def periodic_backup(context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init_sheets_handler()
-    application = Application.builder().token(os.getenv("BOT_TOKEN")).build()
+
+    request = HTTPXRequest(
+        connect_timeout=30,
+        read_timeout=30,
+        write_timeout=30,
+        pool_timeout=30
+    )
+
+    application = (
+        Application.builder()
+        .token(os.getenv("BOT_TOKEN"))
+        .request(request)
+        .build()
+    )
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -332,10 +362,16 @@ def main():
     )
 
     application.add_handler(conv_handler)
+
     if config.BACKUP_ENABLED:
-        application.job_queue.run_repeating(periodic_backup, interval=config.BACKUP_INTERVAL_HOURS * 3600, first=10)
-    
+        application.job_queue.run_repeating(
+            periodic_backup,
+            interval=config.BACKUP_INTERVAL_HOURS * 3600,
+            first=10
+        )
+
     application.run_polling()
+
 
 if __name__ == "__main__":
     main()

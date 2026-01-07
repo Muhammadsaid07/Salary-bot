@@ -1,7 +1,7 @@
 """
 Database handler for storing teacher accounts and access codes
 """
-
+import threading
 import sqlite3
 import secrets
 import string
@@ -10,6 +10,7 @@ import shutil
 from datetime import datetime
 from typing import Optional, List, Tuple
 from config import DATABASE_FILE, ACCESS_CODE_LENGTH, BACKUP_DIR, BACKUP_ENABLED
+
 
 
 class Database:
