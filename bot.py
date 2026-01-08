@@ -220,6 +220,8 @@ async def backup_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # -------------------- TEACHER HANDLERS --------------------
 
+# -------------------- TEACHER HANDLERS --------------------
+
 async def handle_teacher_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     access_code = update.message.text.strip().upper()
@@ -231,10 +233,15 @@ async def handle_teacher_code(update: Update, context: ContextTypes.DEFAULT_TYPE
     teacher_info = db.get_teacher_by_code(access_code)
 
     if teacher_info:
+        # 1. Save teacher info
         teacher_id, teacher_name = teacher_info
         user_states[user_id] = {"role": "teacher", "teacher_name": teacher_name}
-        await show_teacher_menu(update, context, from_message=True)
-        return TEACHER_MENU
+        
+        # 2. Skip the menu and show salary IMMEDIATELY
+        await update.message.reply_text(f"✅ Code accepted! Fetching details for {teacher_name}...")
+        
+        # We call get_my_salary and tell it we are coming from a message login
+        return await get_my_salary(update, context, from_login=True)
     else:
         attempts += 1
         user_states[user_id]["attempts"] = attempts
@@ -245,13 +252,56 @@ async def handle_teacher_code(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"❌ Incorrect code. {remaining} left.")
         return WAITING_FOR_TEACHER_CODE
 
-async def get_my_salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def get_my_salary(update: Update, context: ContextTypes.DEFAULT_TYPE, from_login=False):
     user_id = update.effective_user.id
-    teacher_name = user_states[user_id]["teacher_name"]
+    teacher_name = user_states[user_id].get("teacher_name")
     
+    if not teacher_name:
+        await update.message.reply_text("❌ Session expired. Please /start again.")
+        return ConversationHandler.END
+
     if not sheets_handler:
-        await update.callback_query.edit_message_text("❌ Service unavailable.")
+        msg = "❌ Salary service unavailable."
+        if from_login: await update.message.reply_text(msg)
+        else: await update.callback_query.edit_message_text(msg)
         return TEACHER_MENU
+
+    try:
+        salary_data = sheets_handler.find_teacher_row(teacher_name)
+        
+        if salary_data:
+            message_text = sheets_handler.format_salary_message(salary_data)
+            
+            # Buttons to Refresh data or Logout
+            keyboard = [
+                [InlineKeyboardButton("🔄 Refresh Data", callback_data="my_salary")],
+                [InlineKeyboardButton("🚪 Logout", callback_data="teacher_logout")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            full_text = f"💰 **Your Salary Details:**\n\n{message_text}"
+            
+            if from_login:
+                # If they just entered their code, send a NEW message
+                await update.message.reply_text(full_text, reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                # If they clicked "Refresh", EDIT the existing message
+                try:
+                    await update.callback_query.edit_message_text(full_text, reply_markup=reply_markup, parse_mode='Markdown')
+                except Exception as e:
+                    if "Message is not modified" in str(e):
+                        await update.callback_query.answer("Already up to date!")
+                    else:
+                        raise e
+        else:
+            error_msg = f"❌ Data for '{teacher_name}' not found in the sheet."
+            if from_login: await update.message.reply_text(error_msg)
+            else: await update.callback_query.edit_message_text(error_msg)
+            
+    except Exception as e:
+        logger.error(f"Error in get_my_salary: {e}")
+        
+    return TEACHER_MENU
 
     try:
         salary_data = sheets_handler.find_teacher_row(teacher_name)
