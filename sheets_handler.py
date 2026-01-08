@@ -28,16 +28,28 @@ class SheetsHandler:
         return None
 
     def _extract_salary_data(self, row: list, teacher_name: str) -> Dict[str, any]:
-        # --- ALL CODE BELOW MUST BE INDENTED ---
         m = config.COLUMN_MAPPING
         
         def clean_number(key):
             idx = m.get(key)
             if idx is not None and idx < len(row):
-                raw_val = str(row[idx]).replace(" ", "").replace(",", "")
-                clean_val = "".join(c for c in raw_val if c.isdigit() or c == '.')
+                # 1. Convert to string and remove spaces/commas
+                raw_val = str(row[idx]).strip().replace(" ", "").replace(",", "")
+                
+                # 2. Handle Google Sheets "Accounting" format: (792) becomes -792
+                if raw_val.startswith('(') and raw_val.endswith(')'):
+                    raw_val = '-' + raw_val[1:-1]
+                
+                # 3. Replace special Unicode dashes with standard minus signs
+                raw_val = raw_val.replace('−', '-').replace('–', '-').replace('—', '-')
+                
+                # 4. CRITICAL FIX: Include '-' in the allowed characters
+                clean_val = "".join(c for c in raw_val if c.isdigit() or c == '.' or c == '-')
+                
                 try:
-                    return float(clean_val) if clean_val else 0
+                    if not clean_val or clean_val == "-":
+                        return 0
+                    return float(clean_val)
                 except ValueError:
                     return 0
             return 0
@@ -54,7 +66,6 @@ class SheetsHandler:
             "tax": clean_number("tax"),
             "remains": clean_number("remains"),
         }
-
     def format_salary_message(self, data: Dict[str, any]) -> str:
         def f(val):
             try:
